@@ -1,4 +1,4 @@
-package percounter
+package zmqcluster
 
 import (
 	"fmt"
