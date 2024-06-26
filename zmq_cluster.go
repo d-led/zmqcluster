@@ -11,8 +11,10 @@ import (
 	"github.com/go-zeromq/zmq4"
 )
 
+// an approximation of https://zguide.zeromq.org/docs/chapter8/#True-Peer-Connectivity-Harmony-Pattern
+
 type ClusterListener interface {
-	OnMessage(message []byte)
+	OnMessage(identity []byte, message []byte)
 	OnNewPeerConnected(c Cluster, peer string)
 }
 
@@ -44,7 +46,7 @@ func NewZmqCluster(identity, bindAddr string) *ZmqCluster {
 	res := &ZmqCluster{
 		bindAddr:          bindAddr,
 		listeners:         []ClusterListener{},
-		server:            zmq4.NewPull(ctx),
+		server:            zmq4.NewRouter(ctx),
 		peers:             make(map[string]zmq4.Socket),
 		ctx:               ctx,
 		stop:              cancel,
@@ -112,7 +114,7 @@ func (z *ZmqCluster) UpdatePeers(peers []string) {
 		// if not connected, connect
 		for _, peer := range peers {
 			if _, ok := z.peers[peer]; !ok {
-				socket := zmq4.NewPush(context.Background())
+				socket := zmq4.NewDealer(context.Background(), zmq4.WithID(zmq4.SocketIdentity(z.myIdentity)))
 				log.Printf("%s: connecting to %s", z.myIdentity, peer)
 				err := socket.Dial(peer)
 				if err != nil {
@@ -184,7 +186,16 @@ func (z *ZmqCluster) receiveLoop() {
 			return
 		}
 		for _, listener := range z.listeners {
-			listener.OnMessage(msg.Bytes())
+			len := len(msg.Frames)
+			var identity, message []byte
+			if len == 2 {
+				identity = msg.Frames[0]
+				message = msg.Frames[1]
+			} else {
+				identity = []byte{}
+				message = msg.Bytes()
+			}
+			listener.OnMessage(identity, message)
 		}
 	}
 }
