@@ -26,6 +26,8 @@ type Cluster interface {
 	Stop()
 	AddListenerSync(listener ClusterListener)
 	AddListener(listener ClusterListener)
+	SetMyIP(ip string)
+	MyIP() string
 }
 
 type ZmqCluster struct {
@@ -39,6 +41,7 @@ type ZmqCluster struct {
 	stop              context.CancelFunc
 	receiveLaterDelay time.Duration
 	myIdentity        string
+	myIP              string
 }
 
 func NewZmqCluster(identity, bindAddr string) *ZmqCluster {
@@ -89,6 +92,20 @@ func (z *ZmqCluster) AddListenerSync(listener ClusterListener) {
 	phony.Block(z, func() {
 		z.listeners = append(z.listeners, listener)
 	})
+}
+
+func (z *ZmqCluster) SetMyIP(myIP string) {
+	phony.Block(z, func() {
+		z.myIP = myIP
+	})
+}
+
+func (z *ZmqCluster) MyIP() string {
+	var myIP string
+	phony.Block(z, func() {
+		myIP = z.myIP
+	})
+	return myIP
 }
 
 func (z *ZmqCluster) AddListener(listener ClusterListener) {
