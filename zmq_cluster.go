@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/Arceliar/phony"
@@ -28,6 +29,7 @@ type Cluster interface {
 	AddListener(listener ClusterListener)
 	SetMyIP(ip string)
 	MyIP() string
+	MyTcpPort() string
 }
 
 type ZmqCluster struct {
@@ -42,12 +44,14 @@ type ZmqCluster struct {
 	receiveLaterDelay time.Duration
 	myIdentity        string
 	myIP              string
+	myTcpPort         string
 }
 
 func NewZmqCluster(identity, bindAddr string) *ZmqCluster {
 	ctx, cancel := context.WithCancel(context.Background())
 	res := &ZmqCluster{
 		bindAddr:          bindAddr,
+		myTcpPort:         tpPortOf(bindAddr),
 		listeners:         []ClusterListener{},
 		server:            zmq4.NewRouter(ctx),
 		peers:             make(map[string]zmq4.Socket),
@@ -106,6 +110,14 @@ func (z *ZmqCluster) MyIP() string {
 		myIP = z.myIP
 	})
 	return myIP
+}
+
+func (z *ZmqCluster) MyTcpPort() string {
+	var myTcpPort string
+	phony.Block(z, func() {
+		myTcpPort = z.myTcpPort
+	})
+	return myTcpPort
 }
 
 func (z *ZmqCluster) AddListener(listener ClusterListener) {
@@ -246,4 +258,12 @@ func setOf(s []string) map[string]bool {
 		res[e] = true
 	}
 	return res
+}
+
+func tpPortOf(bindAddr string) string {
+	pos := strings.LastIndex(bindAddr, ":")
+	if pos == -1 || len(bindAddr) < pos+2 {
+		return ""
+	}
+	return bindAddr[pos+1:]
 }

@@ -103,4 +103,9 @@ func TestZmqCluster(t *testing.T) {
 		// c1 should not have received the message
 		l1.WaitForNumberOfMessagesReceivedEq(t, 1)
 	})
+
+	t.Run("tcp port parsed from bind string", func(t *testing.T) {
+		assert.Equal(t, "4444", tpPortOf(":4444"))
+		assert.Equal(t, "3333", tpPortOf("127.0.0.1:3333"))
+	})
 }
