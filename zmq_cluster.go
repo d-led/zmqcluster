@@ -131,17 +131,7 @@ func (z *ZmqCluster) UpdatePeers(peers []string) {
 		// if not connected, connect
 		for _, peer := range peers {
 			if _, ok := z.peers[peer]; !ok {
-				socket := zmq4.NewDealer(context.Background(), zmq4.WithID(zmq4.SocketIdentity(z.myIdentity)))
-				log.Printf("%s: connecting to %s", z.myIdentity, peer)
-				err := socket.Dial(peer)
-				if err != nil {
-					log.Printf("%s: could not connect to peer: %s: %v", z.myIdentity, peer, err)
-					continue
-				}
-				z.peers[peer] = socket
-				for _, listener := range z.listeners {
-					listener.OnNewPeerConnected(z, peer)
-				}
+				z.addClientSync(peer)
 			}
 		}
 	})
@@ -165,16 +155,44 @@ func (z *ZmqCluster) BroadcastMessage(message []byte) {
 
 func (z *ZmqCluster) SendMessageToPeer(peer string, message []byte) {
 	z.Act(z, func() {
+		z.sendMessageToPeerSync(peer, message, true)
+	})
+}
+
+func (z *ZmqCluster) sendMessageToPeerSync(peer string, message []byte, tryConnect bool) {
+	z.Act(z, func() {
 		client, ok := z.peers[peer]
 		if !ok {
-			log.Printf("%s: client not found for peer %s", z.myIdentity, peer)
+			if tryConnect {
+				log.Printf("%s: client not found for peer %s, adding the client and re-trying", z.myIdentity, peer)
+				z.addClientSync(peer)
+				// do not try to create the client again
+				z.sendMessageToPeerSync(peer, message, false)
+			} else {
+				log.Printf("%s: client not found for peer %s", z.myIdentity, peer)
+			}
 			return
+
 		}
 		err := z.sendToPeerSync(client, message)
 		if err != nil {
 			log.Printf("%s: failed sending a message to peer %s: %v", z.myIdentity, peer, err)
 		}
 	})
+}
+
+func (z *ZmqCluster) addClientSync(peer string) {
+	socket := zmq4.NewDealer(context.Background(), zmq4.WithID(zmq4.SocketIdentity(z.myIdentity)))
+	log.Printf("%s: connecting to %s", z.myIdentity, peer)
+	err := socket.Dial(peer)
+	if err != nil {
+		log.Printf("%s: could not connect to peer: %s: %v", z.myIdentity, peer, err)
+		return
+	}
+	z.peers[peer] = socket
+	for _, listener := range z.listeners {
+		listener.OnNewPeerConnected(z, peer)
+	}
 }
 
 func (z *ZmqCluster) sendToPeerSync(client zmq4.Socket, message []byte) error {
