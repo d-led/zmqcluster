@@ -13,12 +13,14 @@ import (
 type testListener struct {
 	phony.Inbox
 	received [][]string
+	sent     [][]string
 	counter  int
 }
 
 func newTestListener() *testListener {
 	return &testListener{
 		received: [][]string{},
+		sent:     [][]string{},
 	}
 }
 
@@ -26,6 +28,13 @@ func (tl *testListener) OnMessage(identity []byte, message []byte) {
 	tl.Act(tl, func() {
 		log.Printf("received: '%s' from '%s'", string(message), string(identity))
 		tl.received = append(tl.received, []string{string(identity), string(message)})
+	})
+}
+
+func (tl *testListener) OnMessageSent(peer string, message []byte) {
+	tl.Act(tl, func() {
+		log.Printf("sent: '%s' from '%s'", string(message), peer)
+		tl.sent = append(tl.sent, []string{peer, string(message)})
 	})
 }
 
@@ -92,6 +101,7 @@ func TestZmqCluster(t *testing.T) {
 		// bidirectional connection
 		c2.UpdatePeers([]string{"tcp://localhost:" + port1})
 		l1.WaitForNumberOfMessagesReceivedEq(t, 1)
+		assert.Len(t, l1.sent, 1) // hi
 		assert.Equal(t, "2", string(l1.Received()[0][0]))
 		assert.Equal(t, "0", string(l1.Received()[0][1]))
 
@@ -102,6 +112,7 @@ func TestZmqCluster(t *testing.T) {
 		assert.Equal(t, "broadcast1", string(l2.Received()[1][1]))
 		// c1 should not have received the message
 		l1.WaitForNumberOfMessagesReceivedEq(t, 1)
+		assert.Len(t, l1.sent, 2)
 	})
 
 	t.Run("tcp port parsed from bind string", func(t *testing.T) {

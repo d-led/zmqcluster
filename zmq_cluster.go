@@ -16,6 +16,7 @@ import (
 
 type ClusterListener interface {
 	OnMessage(identity []byte, message []byte)
+	OnMessageSent(peer string, message []byte)
 	OnNewPeerConnected(c Cluster, peer string)
 }
 
@@ -155,8 +156,8 @@ func (z *ZmqCluster) BroadcastMessage(message []byte) {
 			return
 		}
 
-		for _, client := range z.peers {
-			err := z.sendToPeerSync(client, message)
+		for identity, client := range z.peers {
+			err := z.sendToPeerSync(identity, client, message)
 			if err != nil {
 				log.Printf("%s: error sending state state: %v", z.myIdentity, err)
 				continue
@@ -186,7 +187,7 @@ func (z *ZmqCluster) sendMessageToPeerSync(peer string, message []byte, tryConne
 			return
 
 		}
-		err := z.sendToPeerSync(client, message)
+		err := z.sendToPeerSync(peer, client, message)
 		if err != nil {
 			log.Printf("%s: failed sending a message to peer %s: %v", z.myIdentity, peer, err)
 		}
@@ -207,8 +208,14 @@ func (z *ZmqCluster) addClientSync(peer string) {
 	}
 }
 
-func (z *ZmqCluster) sendToPeerSync(client zmq4.Socket, message []byte) error {
-	return client.Send(zmq4.NewMsg(message))
+func (z *ZmqCluster) sendToPeerSync(identity string, client zmq4.Socket, message []byte) error {
+	err := client.Send(zmq4.NewMsg(message))
+	if err == nil {
+		z.forAllListenersSync(func(listener ClusterListener) {
+			listener.OnMessageSent(identity, message)
+		})
+	}
+	return err
 }
 
 func (z *ZmqCluster) receiveLoop() {
@@ -232,19 +239,30 @@ func (z *ZmqCluster) receiveLoop() {
 			}
 			return
 		}
-		for _, listener := range z.listeners {
-			len := len(msg.Frames)
-			var identity, message []byte
-			if len == 2 {
-				identity = msg.Frames[0]
-				message = msg.Frames[1]
-			} else {
-				identity = []byte{}
-				message = msg.Bytes()
-			}
+
+		identity, message := splitMessage(&msg)
+		z.forAllListenersSync(func(listener ClusterListener) {
 			listener.OnMessage(identity, message)
-		}
+		})
 	}
+}
+
+func (z *ZmqCluster) forAllListenersSync(cb func(listener ClusterListener)) {
+	for _, listener := range z.listeners {
+		cb(listener)
+	}
+}
+
+func splitMessage(msg *zmq4.Msg) (identity, message []byte) {
+	len := len(msg.Frames)
+	if len == 2 {
+		identity = msg.Frames[0]
+		message = msg.Frames[1]
+	} else {
+		identity = []byte{}
+		message = msg.Bytes()
+	}
+	return
 }
 
 func (z *ZmqCluster) receiveLater() {
