@@ -12,13 +12,15 @@ import (
 
 type testListener struct {
 	phony.Inbox
+	identity string
 	received [][]string
 	sent     [][]string
 	counter  int
 }
 
-func newTestListener() *testListener {
+func newTestListener(identity string) *testListener {
 	return &testListener{
+		identity: identity,
 		received: [][]string{},
 		sent:     [][]string{},
 	}
@@ -26,20 +28,21 @@ func newTestListener() *testListener {
 
 func (tl *testListener) OnMessage(identity []byte, message []byte) {
 	tl.Act(tl, func() {
-		log.Printf("received: '%s' from '%s'", string(message), string(identity))
+		log.Printf("%s: received '%s' from '%s'", tl.identity, string(message), string(identity))
 		tl.received = append(tl.received, []string{string(identity), string(message)})
 	})
 }
 
 func (tl *testListener) OnMessageSent(peer string, message []byte) {
 	tl.Act(tl, func() {
-		log.Printf("sent: '%s' from '%s'", string(message), peer)
+		log.Printf("%s: sent '%s' to '%s'", tl.identity, string(message), peer)
 		tl.sent = append(tl.sent, []string{peer, string(message)})
 	})
 }
 
 func (tl *testListener) OnNewPeerConnected(c Cluster, peer string) {
 	tl.Act(tl, func() {
+		// broadcasting a counter to all peers
 		c.BroadcastMessage([]byte(fmt.Sprint(tl.counter)))
 		tl.counter++
 	})
@@ -59,7 +62,7 @@ func (tl *testListener) WaitForNumberOfMessagesReceivedEq(t *testing.T, expected
 			// all ok
 			return
 		}
-		log.Printf("waiting for the number of message to reach %d ...", expectedCount)
+		log.Printf("%s: waiting for the number of message to reach %d ...", tl.identity, expectedCount)
 		time.Sleep(100 * time.Millisecond)
 	}
 	assert.Equal(t, expectedCount, len(tl.Received()))
@@ -68,7 +71,7 @@ func (tl *testListener) WaitForNumberOfMessagesReceivedEq(t *testing.T, expected
 func TestZmqCluster(t *testing.T) {
 	t.Run("updating the cluster", func(t *testing.T) {
 		port1 := randomPort()
-		l1 := newTestListener()
+		l1 := newTestListener("l1")
 		c1 := NewZmqCluster("1", "tcp://:"+port1)
 		c1.AddListenerSync(l1)
 		t.Cleanup(c1.Stop)
@@ -81,7 +84,7 @@ func TestZmqCluster(t *testing.T) {
 
 		l1.WaitForNumberOfMessagesReceivedEq(t, 0)
 
-		l2 := newTestListener()
+		l2 := newTestListener("l2")
 		port2 := randomPort()
 		c2 := NewZmqCluster("2", "tcp://:"+port2)
 		c2.AddListener(l2)
@@ -101,7 +104,7 @@ func TestZmqCluster(t *testing.T) {
 		// bidirectional connection
 		c2.UpdatePeers([]string{"tcp://localhost:" + port1})
 		l1.WaitForNumberOfMessagesReceivedEq(t, 1)
-		assert.Len(t, l1.sent, 1) // hi
+		assert.Len(t, l1.sent, 1) // counter from OnNewPeerConnected cb
 		assert.Equal(t, "2", string(l1.Received()[0][0]))
 		assert.Equal(t, "0", string(l1.Received()[0][1]))
 
